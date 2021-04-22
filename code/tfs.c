@@ -32,26 +32,65 @@ char diskfile_path[PATH_MAX];
 int get_avail_ino() {
 
 	// Step 1: Read inode bitmap from disk
-	
+	struct superblock* s_block= malloc(sizeof(struct superblock));
+	//might not work since it might try and read a full block into a superblock, might need to read full block then memcpy part instead 
+	bio_read(0, (void *) s_block);
+	bitmap_t inode_bitmap = malloc(sizeof(bitmap_t));
+	if(s_block != NULL){
+		//same thing with this. might need to make void buffer the size of a block and then just cast it to be a bitmap
+		bio_read(s_block->i_bitmap_blk, (void*)inode_bitmap);
+	}else{
+		//something wrong with read
+		return -1;
+	}	
 	// Step 2: Traverse inode bitmap to find an available slot
-
+	int i, pos = -1;
+	for(i = 0; i < MAX_INUM; i++){
+		if(get_bitmap(inode_bitmap, i)==0){
+			pos = i;
+		}
+	}
+	if(pos == -1){
+		//no free blocks
+		return -1;
+	}
 	// Step 3: Update inode bitmap and write to disk 
-
-	return 0;
+	set_bitmap(inode_bitmap, pos);
+	bio_write(s_block->i_bitmap_blk, (const void *)inode_bitmap);
+	return pos;
 }
 
 /* 
  * Get available data block number from bitmap
  */
 int get_avail_blkno() {
+	//almost exact same as previous function. refer to its comments to understand
 
-	// Step 1: Read data block bitmap from disk
-	
-	// Step 2: Traverse data block bitmap to find an available slot
-
-	// Step 3: Update data block bitmap and write to disk 
-
-	return 0;
+	// Step 1: Read inode bitmap from disk
+	struct superblock* s_block= malloc(sizeof(struct superblock));
+	bio_read(0, (void *) s_block);
+	bitmap_t data_bitmap = malloc(sizeof(bitmap_t));
+	if(s_block != NULL){
+		bio_read(s_block->d_bitmap_blk, (void*)data_bitmap);
+	}else{
+		//something wrong with read
+		return -1;
+	}	
+	// Step 2: Traverse inode bitmap to find an available slot
+	int i, pos = -1;
+	for(i = 0; i < MAX_DNUM; i++){
+		if(get_bitmap(data_bitmap, i)==0){
+			pos = i;
+		}
+	}
+	if(pos == -1){
+		//no free blocks
+		return -1;
+	}
+	// Step 3: Update inode bitmap and write to disk 
+	set_bitmap(data_bitmap, pos);
+	bio_write(s_block->d_bitmap_blk, (const void *)data_bitmap);
+	return pos;
 }
 
 /* 
@@ -60,22 +99,41 @@ int get_avail_blkno() {
 int readi(uint16_t ino, struct inode *inode) {
 
   // Step 1: Get the inode's on-disk block number
+  int inodes_per_block = BLOCK_SIZE/sizeof(struct inode);
+  int block_no = ino/inodes_per_block; //int division :)
 
   // Step 2: Get offset of the inode in the inode on-disk block
-
+  int offset = ino%inodes_per_block;
   // Step 3: Read the block from disk and then copy into inode structure
 
-	return 0;
+  // might have to modify this line as noted in get_avail_ino()
+  struct superblock* s_block= malloc(sizeof(struct superblock));
+  bio_read(0, (void *) s_block);
+  char* buffer = malloc(BLOCK_SIZE);
+  //since inode blocks dont start at 0, need to get i_start_blk from the superblock and add that to the calculated block_no
+  bio_read(block_no+s_block->i_start_blk, (void*)buffer);
+  //copy inode from within the block
+  memcpy((void*)inode, (void*) &buffer[sizeof(struct inode)*offset], sizeof(struct inode));
+  return 0;
 }
 
 int writei(uint16_t ino, struct inode *inode) {
 
-	// Step 1: Get the block number where this inode resides on disk
-	
-	// Step 2: Get the offset in the block where this inode resides on disk
+//similar to readi, but need to read block i_start_blk + blockno into mem, copy inode into correct offset, and then write the block back into memory.
 
-	// Step 3: Write inode to disk 
 
+  // Step 1: Get the inode's on-disk block number
+  int inodes_per_block = BLOCK_SIZE/sizeof(struct inode);
+  int block_no = ino/inodes_per_block;
+  // Step 2: Get offset of the inode in the inode on-disk block
+  int offset = ino%inodes_per_block;
+  // Step 3: Write inode to disk
+  struct superblock* s_block= malloc(sizeof(struct superblock));
+  bio_read(0, (void *) s_block);
+  char* buffer = malloc(BLOCK_SIZE);
+  bio_read(block_no+s_block->i_start_blk, (void*)buffer);
+  memcpy((void*) &buffer[sizeof(struct inode)*offset], (void*) inode, sizeof(struct inode));
+  bio_write(block_no+s_block->i_start_blk, (const void*) buffer);
 	return 0;
 }
 
