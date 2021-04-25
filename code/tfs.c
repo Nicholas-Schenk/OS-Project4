@@ -225,6 +225,31 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 	// Allocate a new data block for this directory if it does not exist
 	if(j_pos < 0){
 		//find empty data block and allocate it 
+		char * block = malloc(BLOCK_SIZE);
+		bio_read(s_block->d_bitmap_blk, block);
+		int i, j;
+		for(i =0; i < MAX_DNUM; i++){
+			if(get_bitmap((bitmap_t) block, i)==0){
+				//block is invalid, aka free to be given to inode
+				
+				set_bitmap((bitmap_t) block, i);
+				bio_write(s_block->d_bitmap_blk, block);
+				dir_inode.size+=BLOCK_SIZE;
+				dir_inode.direct_ptr[dir_inode.size/BLOCK_SIZE] = i;
+				free(block);
+				char * new_data_block = malloc(BLOCK_SIZE);
+				struct dirent temp;
+				temp.valid = 0;
+				//fill block with dirents
+				for(j =0; j < BLOCK_SIZE/sizeof(struct dirent);j++){
+					memcpy(&new_data_block[j*sizeof(struct dirent)], &temp, sizeof(struct dirent)); 
+				}
+				bio_write(i+s_block->d_start_blk, new_data_block);
+				i_pos = i;
+				j_pos = 0;	
+
+			}
+		}
 	}
 
 
@@ -250,12 +275,28 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 int dir_remove(struct inode dir_inode, const char *fname, size_t name_len) {
 
 	// Step 1: Read dir_inode's data block and checks each directory entry of dir_inode
-	
+	int num_blocks = dir_inode.size/BLOCK_SIZE;
+	int i, j;
+	for(i=0; i < num_blocks; i++){
+		char * buffer = malloc(BLOCK_SIZE);
+		bio_read(dir_inode.direct_ptr[i]+s_block->d_start_blk, buffer );
+		for(j=0; j < BLOCK_SIZE/sizeof(struct dirent);j++){
+			struct dirent* cur_dirent= malloc(sizeof(struct dirent));
+			memcpy(cur_dirent, &buffer[j*sizeof(struct dirent)], sizeof(struct dirent));
+			if(strcmp(fname, cur_dirent->name) == 0 && name_len == cur_dirent->len){
+				cur_dirent->valid = 0;
+				memcpy(&buffer[j*sizeof(struct dirent)], cur_dirent, sizeof(struct dirent));
+				bio_write(dir_inode.direct_ptr[i]+s_block->d_start_blk, buffer);
+				return 0; 	
+			}
+			
+		}
+	}
 	// Step 2: Check if fname exist
 
 	// Step 3: If exist, then remove it from dir_inode's data block and write to disk
 
-	return 0;
+	return -1;
 }
 
 /* 
