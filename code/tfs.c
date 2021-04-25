@@ -170,7 +170,9 @@ int dir_find(uint16_t ino, const char *fname, size_t name_len, struct dirent *di
 int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t name_len) {
 
 	// Step 1: Read dir_inode's data block and check each directory entry of dir_inode
-	
+
+
+
 	// Step 2: Check if fname (directory name) is already used in other entries
 	int num_blocks = dir_inode.size/BLOCK_SIZE;
 	int entries_per_block = BLOCK_SIZE/sizeof(struct dirent);
@@ -181,28 +183,67 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 	int i, j, count=0;
 	for(i = 0; i < num_blocks;i++){
 		char * block = malloc(BLOCK_SIZE);
-		//bio_read();
+		bio_read(dir_inode.direct_ptr[i]+s_block->d_start_blk, block);
 		for(j=0; j < entries_per_block;j++){
 			count++;
 			if(count > num_entries){
 				break;
 			}
 			struct dirent* temp = malloc(sizeof(struct dirent));
-			/*memcpy(temp, );
-			if(){
-			
-			}*/
+			memcpy(temp, &block[j*sizeof(struct dirent)], sizeof(struct dirent) );
+			if(temp->valid == 1){
+				if(temp->len == name_len && strcmp(fname, temp->name)==0){
+					//repeat
+					return -1;
+				}
+			}
 				
 		}
 	}
 	// Step 3: Add directory entry in dir_inode's data block and write to disk
-
+	int j_pos = -1, i_pos=-1;
+	for(i = 0; i < num_blocks;i++){
+		char * block = malloc(BLOCK_SIZE);
+		bio_read(dir_inode.direct_ptr[i]+s_block->d_start_blk, block);
+		for(j=0; j < entries_per_block;j++){
+			struct dirent* temp = malloc(sizeof(struct dirent));
+			memcpy(temp, &block[j*sizeof(struct dirent)], sizeof(struct dirent) );
+			if(temp->valid == 0){
+				j_pos = j;
+				i_pos = i;
+				free(temp);
+				break;
+			}
+			free(temp);
+				
+		}
+		if(j_pos > 0){
+			break;
+		}
+		free(block);
+	}
 	// Allocate a new data block for this directory if it does not exist
+	if(j_pos < 0){
+		//find empty data block and allocate it 
+	}
+
 
 	// Update directory inode
+	char* block = malloc(BLOCK_SIZE);
+	bio_read(dir_inode.direct_ptr[i_pos]+s_block->d_start_blk, block);
+	struct dirent *temp = malloc(sizeof(struct dirent));
+	memcpy(temp, &block[j_pos*sizeof(struct dirent)], sizeof(struct dirent));
+	//char temp_name[208];
+	memcpy(temp->name, fname, name_len+1);
+	temp->valid = 1;
+	temp->ino = f_ino;
+	temp->len = name_len;
+
+	memcpy(&block[j_pos*sizeof(struct dirent)], temp, sizeof(struct dirent));
+	
 
 	// Write directory entry
-
+	bio_write(dir_inode.direct_ptr[i]+s_block->d_start_blk, block);
 	return 0;
 }
 
