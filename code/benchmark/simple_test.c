@@ -37,16 +37,16 @@ int main(int argc, char **argv) {
 	for (i = 0; i < ITERS; i++) {
 		//memset with some random data
 		memset(buf, 0x61 + i, BLOCKSIZE);
-
-		if (write(fd, buf, BLOCKSIZE) != BLOCKSIZE) {
-			printf("TEST 2: File write failure \n");
+		int ret = (write(fd, buf, BLOCKSIZE));
+		if (ret != BLOCKSIZE) {
+			printf("TEST 2: File write failure: %d -> %d \n", i, ret);
 			exit(1);
 		}
 	}
 	
 	fstat(fd, &st);
 	if (st.st_size != ITERS*BLOCKSIZE) {
-		printf("TEST 2: File write failure \n");
+		printf("-------TEST 2: File write failure: st.st_size: %ld \n", st.st_size);
 		exit(1);
 	}
 	printf("TEST 2: File write Success \n");
@@ -70,9 +70,9 @@ int main(int argc, char **argv) {
 	for (i = 0; i < ITERS; i++) {
 		//clear buffer
 		memset(buf, 0, BLOCKSIZE);
-
-		if (read(fd, buf, BLOCKSIZE) != BLOCKSIZE) {
-			printf("TEST 4: File read failure \n");
+		int ret = (read(fd, buf, BLOCKSIZE));
+		if (ret != BLOCKSIZE) {
+			printf("TEST 4: File read failure in iteration: %d read: %d bytes\n", i, ret);
 			exit(1);
 		}
 		//printf("buf %s \n", buf);

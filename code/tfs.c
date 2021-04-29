@@ -524,7 +524,7 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 		stbuf->st_uid = getuid();
 		stbuf->st_gid = getgid();
 		stbuf->st_ino = temp_inode->ino;
-		//stbuf->st_size = temp_inode->size;
+		stbuf->st_size = temp_inode->size;
 		//stbuf->st_blocks = temp_inode->size/BLOCK_SIZE;
 
 
@@ -649,7 +649,13 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 static int tfs_open(const char *path, struct fuse_file_info *fi) {
 
 	// Step 1: Call get_node_by_path() to get inode from path
-
+	struct inode* temp_inode = malloc(sizeof(struct inode));
+	int ret = get_node_by_path(path, 0, temp_inode);
+	free(temp_inode);
+	if(ret ==-1){
+		printf("failure: couldn't find inode\n");
+		return ret;
+	}
 	// Step 2: If not find, return -1
 
 	return 0;
@@ -659,25 +665,113 @@ static int tfs_read(const char *path, char *buffer, size_t size, off_t offset, s
 
 	// Step 1: You could call get_node_by_path() to get inode from path
 
+	struct inode* temp_inode = malloc(sizeof(struct inode));
+	int ret = get_node_by_path(path, 0, temp_inode);
+	if(ret ==-1){
+		free(temp_inode);
+		printf("failure: couldn't find inode\n");
+		return ret;
+	}
 	// Step 2: Based on size and offset, read its data blocks from disk
-
+	int start_block = offset/BLOCK_SIZE;
+	int num_blocks = size/BLOCK_SIZE;
+	if((size)%BLOCK_SIZE!=0){
+		num_blocks++;
+	}
+	printf("size: %ld, offset: %ld \n NUMBER OF BLOCKS BEING READ: %d STARTING AT: %d\n", size, offset, num_blocks, start_block);
+	int end_block = num_blocks+start_block;
+	int i, bytes_read = 0;
 	// Step 3: copy the correct amount of data from offset to buffer
+	for(i = start_block; i < end_block;i++){
+		char* temp_buffer = malloc(BLOCK_SIZE);
+		bio_read(s_block->d_start_blk+temp_inode->direct_ptr[i], temp_buffer);
+		if(i == start_block){
+			memcpy(buffer,temp_buffer+(offset%BLOCK_SIZE), BLOCK_SIZE-(offset%BLOCK_SIZE));
+		       	bytes_read += BLOCK_SIZE-(offset%BLOCK_SIZE);	
+		}else if(size-bytes_read>=BLOCK_SIZE){
+			memcpy(buffer+bytes_read, temp_buffer, BLOCK_SIZE);
+			bytes_read+=BLOCK_SIZE;
+		}else{
+			memcpy(buffer+bytes_read, temp_buffer, size-bytes_read);
+			bytes_read+=(size-bytes_read);
+		}
+	}
 
 	// Note: this function should return the amount of bytes you copied to buffer
-	return 0;
+	return bytes_read;
 }
 
 static int tfs_write(const char *path, const char *buffer, size_t size, off_t offset, struct fuse_file_info *fi) {
 	// Step 1: You could call get_node_by_path() to get inode from path
-
+	struct inode* temp_inode = malloc(sizeof(struct inode));
+	int ret = get_node_by_path(path, 0, temp_inode);
+	if(ret ==-1){
+		free(temp_inode);
+		printf("failure: couldn't find inode\n");
+		return ret;
+	}
 	// Step 2: Based on size and offset, read its data blocks from disk
+	//char * temp_read_buffer = malloc(size);
+	int start_block = offset/BLOCK_SIZE;
+	int num_blocks = temp_inode->size/BLOCK_SIZE;
+	if((temp_inode->size)%BLOCK_SIZE!=0){
+		num_blocks++;
+	}
+	int i, bytes_written = 0;
+	for(i = start_block; i < num_blocks;i++){
+		char* temp_buffer = malloc(BLOCK_SIZE);
+		bio_read(s_block->d_start_blk+temp_inode->direct_ptr[i], temp_buffer);
+		if(i == start_block){
+			memcpy(temp_buffer+(offset%BLOCK_SIZE), buffer,BLOCK_SIZE-(offset%BLOCK_SIZE));
+			bio_write(s_block->d_start_blk+temp_inode->direct_ptr[i], temp_buffer);
+		       	bytes_written += BLOCK_SIZE-(offset%BLOCK_SIZE);	
+		}else if(size-bytes_written>=BLOCK_SIZE){
+			memcpy(temp_buffer+bytes_written, buffer, BLOCK_SIZE);
+			bytes_written+=BLOCK_SIZE;
+			bio_write(s_block->d_start_blk+temp_inode->direct_ptr[i], temp_buffer);
+		}else{
+			memcpy(temp_buffer+bytes_written, buffer, size-bytes_written);
+			bytes_written+=(size-bytes_written);
+			bio_write(s_block->d_start_blk+temp_inode->direct_ptr[i], temp_buffer);
+		}
+	}
 
+	if(bytes_written < size){ // need to give more blocks
+		int num_new_blocks = (size-bytes_written)/BLOCK_SIZE;
+		if((size-bytes_written)%BLOCK_SIZE!=0){
+			num_new_blocks++;
+		}
+		for(i=0; i < num_new_blocks;i++){
+			if(i+num_blocks > 16){
+				return bytes_written;
+			}else{
+				int new_block = get_avail_blkno();
+				temp_inode->direct_ptr[i+num_blocks] = new_block;
+				if(size-bytes_written >= BLOCK_SIZE ){
+					bio_write(s_block->d_start_blk+temp_inode->direct_ptr[i+num_blocks], buffer+bytes_written);
+					bytes_written+=BLOCK_SIZE;
+				}else{
+					char* temp_buffer = malloc(BLOCK_SIZE);
+					memcpy(temp_buffer, buffer+bytes_written, size-bytes_written);
+					bio_write(s_block->d_start_blk+temp_inode->direct_ptr[i+num_blocks], temp_buffer);
+					bytes_written+=(size-bytes_written);	
+				}
+
+			}
+
+		}
+
+
+	}
+	
 	// Step 3: Write the correct amount of data from offset to disk
 
 	// Step 4: Update the inode info and write it to disk
+	temp_inode->size = offset+bytes_written;
+	writei(temp_inode->ino, temp_inode);
 
 	// Note: this function should return the amount of bytes you write to disk
-	return size;
+	return bytes_written;
 }
 
 static int tfs_unlink(const char *path) {
