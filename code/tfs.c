@@ -605,7 +605,7 @@ static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 }
 
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
-
+   // buffer = malloc(BLOCK_SIZE);
     // Step 1: Call get_node_by_path() to get inode from path
     struct inode *inode = malloc(sizeof (struct inode));
 
@@ -618,10 +618,21 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 		if (inode->direct_ptr[i] > -1) {
 			printf("block to read from on iteration %d: %d\n", i, inode->direct_ptr[i]);
 			struct dirent* dirent = (struct dirent*) malloc(sizeof(struct dirent));
-			char* buffer = malloc(BLOCK_SIZE);
-			bio_read(s_block->d_start_blk + inode->direct_ptr[i], buffer);
-			memcpy(dirent, buffer, sizeof(struct dirent));
-			filler(buffer, dirent->name, NULL, 0);
+			char* temp_buffer = malloc(BLOCK_SIZE);
+			bio_read(s_block->d_start_blk + inode->direct_ptr[i], temp_buffer);
+			int j, dirents_per_block;
+			dirents_per_block = BLOCK_SIZE/sizeof(struct dirent);
+			for(j=0; j < dirents_per_block; j++){
+				memcpy(dirent, &temp_buffer[j*sizeof(struct dirent)], sizeof(struct dirent));
+				if(dirent->valid == 1){
+					printf("here is the name: -%s-\n", dirent->name);
+					char* temp = malloc(sizeof(char)*(strlen(dirent->name)+1));
+					memcpy(temp, dirent->name, strlen(dirent->name));
+					temp[strlen(dirent->name)] = '\0';
+					struct stat* stbuf = malloc(sizeof(struct stat));
+					filler(buffer, dirent->name, NULL,  0);
+				}
+			}
 		}
 	}
 
@@ -733,15 +744,17 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 	char *dir, *base, *dir_name, *base_name;
 	//dirname and basename modify their arguments so need to duplicate string
 	printf("-------duplicating path %s------------\n", path);
-	dir = strdup(path);
-	//base = strdup(path);
-	//dir = malloc(sizeof(char)*10);
-	printf("the first duplicate worked\n");
+	int length = strlen(path);
+	printf("it's not calling strlen\n");
+	dir = malloc(sizeof(char)*(strlen(path)+1));
+	printf("it's not the frist malloc at least\n");
+	base = malloc(sizeof(char)*(strlen(path)+1));
+	printf("it's not the second malloc at least\n");
 	memcpy(dir, path, strlen(path));
-	printf("the first duplicate worked\n");
+	printf("it's not the frist malloc at least\n");
+	memcpy(base, path, strlen(path));
 	dir[strlen(path)] = '\0';
-	printf("the first duplicate worked\n");
-	base = strdup(path);
+	base[strlen(path)] = '\0';
 	dir_name = dirname(dir);
 	printf("dir_name: %s\n", dir_name);
 	base_name = basename(base);
@@ -762,7 +775,7 @@ static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) 
 	int avail_ino = get_avail_ino();
 	printf("first available inode was %d\n", avail_ino);
 	// Step 4: Call dir_add() to add directory entry of target file to parent directory
-	struct inode *new_node = malloc(sizeof(inode));
+	struct inode *new_node = malloc(sizeof(struct inode));
 	printf("-----------calling dir_add---------\n");
 	int found = dir_add(*inode, avail_ino, base_name, strlen(base_name));
 	if(found <0){
