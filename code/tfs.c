@@ -575,20 +575,29 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 
 static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 
-	// Step 1: Call get_node_by_path() to get inode from path
+    struct inode inode;
+    return get_node_by_path(path, 0, &inode);
 
-	// Step 2: If not find, return -1
-
-    return 0;
 }
 
 static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
 
-	// Step 1: Call get_node_by_path() to get inode from path
+    // Step 1: Call get_node_by_path() to get inode from path
+    struct inode inode;
 
-	// Step 2: Read directory entries from its data blocks, and copy them to filler
+    int exists = get_node_by_path(path, 0, &inode);
+	if (exists == -1) return -1;
 
-	return 0;
+    // Step 2: Read directory entries from its data blocks, and copy them to filler
+	for (int i = 0; i < 16; i++) {
+		if (inode.direct_ptr[i] > -1) {
+			struct dirent* dirent = (struct dirent*) malloc(sizeof(struct dirent));
+			bio_read(s_block->d_start_blk + inode.direct_ptr[i], dirent);
+			filler(buffer, dirent->name, NULL, 0);
+		}
+	}
+
+    return 0;
 }
 
 
