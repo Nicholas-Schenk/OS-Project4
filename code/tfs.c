@@ -324,9 +324,9 @@ int dir_add(struct inode dir_inode, uint16_t f_ino, const char *fname, size_t na
 	bio_write(dir_inode.direct_ptr[i_pos]+s_block->d_start_blk, block);
 	bio_read(dir_inode.direct_ptr[i_pos]+s_block->d_start_blk, block);
 	memcpy(temp, &block[j_pos*sizeof(struct dirent)], sizeof(struct dirent));
+	printf("************temp-> valid: %d   temp->ino: %d temp->name %s********\n", temp->valid, temp->ino, temp->name);
 	free(temp);
 	free(block);
-	printf("************temp-> valid: %d   temp->ino: %d temp->name %s********\n", temp->valid, temp->ino, temp->name);
 	return 0;
 }
 
@@ -373,12 +373,18 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 
 
 	char* token = strtok((char*)path, "/");
+	char* path_build = malloc(sizeof(char)*(strlen(path)+1));
+	int f;
+	for(f = 0; f < strlen(path);f++){
+		path_build[f] = '\0';
+	}
 	int dir_inode = ino; //root directory should always be passed (0)
 	struct dirent * dirent = malloc(sizeof(struct dirent));
 	while(token != NULL){
 	//	printf("token: --%s--: directory: %d\n", token, dir_inode);
 		readi(dir_inode, inode);
-		if(inode->type == _FILE_){
+		//strcat(path_build, inode->name;)
+		/*if(inode->type == _FILE_){
 			token=strtok(NULL, "/");
 			if(token ==NULL){
 				printf("returned the inode\n");
@@ -387,7 +393,12 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 				printf("token not null: %s\n", token);
 				return -1;
 			}
-		}
+		}else if(inode->type == _DIRECTORY_){
+			token = strtok(NULL, "/");
+			if(){
+
+			}
+		}*/
 
 
 		
@@ -399,6 +410,14 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 				printf("dir_find failed\n");
 				return -1;
 			}else{
+				strcat(path_build, "/");
+				strcat(path_build, dirent->name);
+				if((strcmp(path_build, path)==0)&&(strlen(path_build) == strlen(path))){
+					readi(dirent->ino, inode);
+					return inode->ino;
+				}else{
+					printf("path_build: %s actual path: %s  path_build length: %ld actual path length: %ld\n", path_build, path, strlen(path_build), strlen(path));
+				}
 				dir_inode = dirent->ino;
 				//token=strtok(NULL, "/");
 			}
@@ -642,28 +661,34 @@ static int tfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, o
 
 static int tfs_mkdir(const char *path, mode_t mode) {
     // Step 1: Use dirname() and basename() to separate parent directory path and target directory name
-    char* parent_path;
-    char* target_path;
-    parent_path = strdup(path);
-    target_path = strdup(path);
+    char* parent_path = malloc(sizeof(char)*(strlen(path)+1));
+    char* target_path = malloc(sizeof(char)*(strlen(path)+1));
+    memcpy(parent_path, path, strlen(path));
+    memcpy(target_path, path, strlen(path));
+    parent_path[strlen(path)] = '\0';
+    target_path[strlen(path)]='\0';
     char* parent_name = dirname(parent_path);
     char* target_name = basename(target_path);
     printf("parent name: %s\n", parent_path);
     printf("target name: %s\n", target_name);
     // Step 2: Call get_node_by_path() to get inode of parent directory
-    struct inode parent_inode;
-    int exists = get_node_by_path(parent_name, 0, &parent_inode);
+    struct inode *parent_inode = malloc(sizeof(struct inode));
+    int exists = get_node_by_path(parent_name, 0, parent_inode);
 	printf("EXISTS??: %d\n", exists);
     if (exists == -1) {
 		printf("ERROR: parent directory does not exist\n");
+		free(parent_name);
+		free(target_name);
 		return -1;
 	}
+
+    readi(exists, parent_inode);
     // Step 3: Call get_avail_ino() to get an available inode number
     int target_ino = get_avail_ino();
 
     // Step 4: Call dir_add() to add directory entry of target directory to parent directory
     struct inode target_inode;
-	dir_add(parent_inode, target_ino, target_name, strlen(target_name));
+	dir_add(*parent_inode, target_ino, target_name, strlen(target_name));
 
     // Step 5: Update inode for target directory
     // struct dirent target_dirent;
@@ -681,6 +706,8 @@ static int tfs_mkdir(const char *path, mode_t mode) {
     for (i = 0; i < 16; i++) {
         target_inode.direct_ptr[i] = -1;
     }
+
+    
 
     // Step 6: Call writei() to write inode to disk
     writei(target_ino, &target_inode);
