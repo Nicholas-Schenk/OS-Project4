@@ -719,23 +719,41 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 static int tfs_rmdir(const char *path) {
 
     // Step 1: Use dirname() and basename() to separate parent directory path and target directory name
-    char* parent_path;
-    char* target_path;
-    parent_path = strdup(path);
-    target_path = strdup(path);
+    char* parent_path = malloc(sizeof(char)*(strlen(path)+1));
+    char* target_path = malloc(sizeof(char)*(strlen(path)+1));
+    memcpy(parent_path, path, strlen(path));
+    memcpy(target_path, path, strlen(path));
+    parent_path[strlen(path)] = '\0';
+    target_path[strlen(path)]='\0';
     char* parent_name = dirname(parent_path);
     char* target_name = basename(target_path);
+    printf("parent name: %s\n", parent_path);
+    printf("target name: %s\n", target_name);
 
     // Step 2: Call get_node_by_path() to get inode of target directory
     struct inode target_inode;
-    get_node_by_path(target_name, 0, &target_inode);
+    int target_ino = get_node_by_path(target_name, 0, &target_inode);
+	if (target_ino == -1) {
+		printf("ERROR: target directory does not exist");
+		free(parent_path);
+		free(target_path);
+		return -1;
+	}
+	readi(target_ino, &target_inode);
 
     // Step 3: Clear data block bitmap of target directory
     bitmap_t data_bitmap = malloc(MAX_DNUM/8);
     void* data_buffer = malloc(BLOCK_SIZE);
     bio_read(s_block->d_bitmap_blk, data_buffer);
     memcpy(data_bitmap, data_buffer, s_block->max_dnum/8);
-    unset_bitmap(data_bitmap, target_inode.direct_ptr[0]);
+    for (int i = 0; i < 16; i++) {
+		if (target_inode.direct_ptr[i] != -1) {
+			unset_bitmap(data_bitmap, target_inode.direct_ptr[i]);
+		}
+	}
+	bio_write(s_block->d_bitmap_blk, (const void *)data_bitmap);
+	free(data_bitmap);
+	free(data_buffer);
     
 
     // Step 4: Clear inode bitmap and its data block
@@ -745,22 +763,28 @@ static int tfs_rmdir(const char *path) {
     memcpy(inode_bitmap, inode_buffer, s_block->max_inum/8);
     unset_bitmap(inode_bitmap, target_inode.ino);
     bio_write(s_block->i_bitmap_blk, (const void *)inode_bitmap);
+	free(inode_bitmap);
+	free(inode_buffer);
 
 
     // Step 5: Call get_node_by_path() to get inode of parent directory
     struct inode parent_inode;
-    int exists = get_node_by_path(parent_name, 0, &parent_inode);
-    if (exists == -1) return -1;
+    int parent_ino = get_node_by_path(parent_name, 0, &parent_inode);
+	if (parent_ino == -1) {
+		printf("ERROR: parent directory does not exist");
+		free(parent_path);
+		free(target_path);
+		return -1;
+	}
+	readi(parent_ino, &parent_inode);
 
     // Step 6: Call dir_remove() to remove directory entry of target directory in its parent directory
     dir_remove(parent_inode, target_name, strlen(target_name));
-    free(inode_buffer);
-    return 0;
-}
 
-static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {
-	// For this project, you don't need to fill this function
-	// But DO NOT DELETE IT!
+	free(parent_path);
+	free(target_path);
+    free(inode_buffer);
+	free(data_buffer);
     return 0;
 }
 
