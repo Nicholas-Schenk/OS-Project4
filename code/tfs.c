@@ -340,12 +340,15 @@ int dir_remove(struct inode dir_inode, const char *fname, size_t name_len) {
 		char * buffer = malloc(BLOCK_SIZE);
 		bio_read(dir_inode.direct_ptr[i]+s_block->d_start_blk, buffer );
 		for(j=0; j < BLOCK_SIZE/sizeof(struct dirent);j++){
+			printf("iteration #%d\n", j);
 			struct dirent* cur_dirent= malloc(sizeof(struct dirent));
 			memcpy(cur_dirent, &buffer[j*sizeof(struct dirent)], sizeof(struct dirent));
 			if(strcmp(fname, cur_dirent->name) == 0 && name_len == cur_dirent->len){
 				cur_dirent->valid = 0;
 				memcpy(&buffer[j*sizeof(struct dirent)], cur_dirent, sizeof(struct dirent));
 				bio_write(dir_inode.direct_ptr[i]+s_block->d_start_blk, buffer);
+				free(cur_dirent);
+				free(buffer);
 				return 0; 	
 			}else{
 				printf("searching for: %s found: %s search length:%ld found length:%d\n", fname, cur_dirent->name, name_len, cur_dirent->len);
@@ -371,9 +374,14 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	// Step 1: Resolve the path name, walk through path, and finally, find its inode.
 	// Note: You could either implement it in a iterative way or recursive way
 
-
-	char* token = strtok((char*)path, "/");
+	printf("PATH: %s\n", path);
+	
+	char* path_cpy = malloc(sizeof(char)*(strlen(path)+1));
+	memcpy(path_cpy, path, strlen(path));
+	path_cpy[strlen(path)] = '\0';
+	char* token = strtok((char*)path_cpy, "/");
 	char* path_build = malloc(sizeof(char)*(strlen(path)+1));
+	printf("PATH: %s\n", path);
 	int f;
 	for(f = 0; f < strlen(path);f++){
 		path_build[f] = '\0';
@@ -383,25 +391,6 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 	while(token != NULL){
 	//	printf("token: --%s--: directory: %d\n", token, dir_inode);
 		readi(dir_inode, inode);
-		//strcat(path_build, inode->name;)
-		/*if(inode->type == _FILE_){
-			token=strtok(NULL, "/");
-			if(token ==NULL){
-				printf("returned the inode\n");
-				return inode->ino;
-			}else{
-				printf("token not null: %s\n", token);
-				return -1;
-			}
-		}else if(inode->type == _DIRECTORY_){
-			token = strtok(NULL, "/");
-			if(){
-
-			}
-		}*/
-
-
-		
 		if(inode->valid == 1){
 	//		printf("SUPER BLOCK TEST: %d\n",s_block->i_start_blk);	
 			int ret = dir_find(dir_inode, token, strlen(token), dirent);
@@ -414,12 +403,13 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 				strcat(path_build, dirent->name);
 				if((strcmp(path_build, path)==0)&&(strlen(path_build) == strlen(path))){
 					readi(dirent->ino, inode);
+					printf("THE SAME: path_build: %s actual path: %s  path_build length: %ld actual path length: %ld\n", path_build, path, strlen(path_build), strlen(path));
 					return inode->ino;
 				}else{
-					printf("path_build: %s actual path: %s  path_build length: %ld actual path length: %ld\n", path_build, path, strlen(path_build), strlen(path));
+					printf("NOT THE SAME: path_build: %s actual path: %s  path_build length: %ld actual path length: %ld\n", path_build, path, strlen(path_build), strlen(path));
 				}
 				dir_inode = dirent->ino;
-				//token=strtok(NULL, "/");
+				token=strtok(NULL, "/");
 			}
 		}else{
 			printf("inode with number %d wasnt valid\n", inode->ino);
@@ -429,8 +419,10 @@ int get_node_by_path(const char *path, uint16_t ino, struct inode *inode) {
 		
 	}
 	
-
-	return 0;
+	if(strcmp(path, "/") == 0 &&strlen(path)==1){
+		return 0;
+	}
+	return -1;
 }
 
 /* 
@@ -619,7 +611,9 @@ static int tfs_getattr(const char *path, struct stat *stbuf) {
 static int tfs_opendir(const char *path, struct fuse_file_info *fi) {
 
     struct inode inode;
-    return get_node_by_path(path, 0, &inode);
+    int ret =  get_node_by_path(path, 0, &inode);
+    if (ret == -1){return ret;}
+    return 0;
 
 }
 
@@ -677,8 +671,8 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 	printf("EXISTS??: %d\n", exists);
     if (exists == -1) {
 		printf("ERROR: parent directory does not exist\n");
-		free(parent_name);
-		free(target_name);
+		free(parent_path);
+		free(target_path);
 		return -1;
 	}
 
@@ -699,12 +693,21 @@ static int tfs_mkdir(const char *path, mode_t mode) {
 
     target_inode.ino = target_ino;
     target_inode.valid = 1;
-    target_inode.size = 0;
+    target_inode.size = 4096;
     target_inode.type = _DIRECTORY_;
     target_inode.link = 2;
     int i;
     for (i = 0; i < 16; i++) {
         target_inode.direct_ptr[i] = -1;
+    }
+
+    int avail_data = get_avail_blkno();
+    target_inode.direct_ptr[0] = avail_data;
+    struct dirent temp_dirent;
+    temp_dirent.valid = 0;
+    char* data_buffer = malloc(BLOCK_SIZE);
+    for(i = 0; i < BLOCK_SIZE/sizeof(struct dirent); i++){
+	memcpy(&data_buffer[sizeof(struct dirent)*i], &temp_dirent, sizeof(struct dirent));
     }
 
     
@@ -732,7 +735,7 @@ static int tfs_rmdir(const char *path) {
 
     // Step 2: Call get_node_by_path() to get inode of target directory
     struct inode target_inode;
-    int target_ino = get_node_by_path(target_name, 0, &target_inode);
+    int target_ino = get_node_by_path(path, 0, &target_inode);
 	if (target_ino == -1) {
 		printf("ERROR: target directory does not exist");
 		free(parent_path);
@@ -783,10 +786,20 @@ static int tfs_rmdir(const char *path) {
 
 	free(parent_path);
 	free(target_path);
-    free(inode_buffer);
-	free(data_buffer);
+    //free(inode_buffer);
+//	free(data_buffer);
     return 0;
 }
+
+
+static int tfs_releasedir(const char *path, struct fuse_file_info *fi) {
+	// For this project, you don't need to fill this function
+	// But DO NOT DELETE IT!
+	return 0;
+}
+
+
+
 
 static int tfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
 
